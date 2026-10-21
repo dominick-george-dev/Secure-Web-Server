@@ -1,0 +1,40 @@
+# ---- Crypto material (keys, plaintext, ciphertext) ----
+key.txt
+pt.txt
+ct.txt
+*.key
+*.pem
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+
+# ---- Secrets / environment ----
+.env
+.env.*
+!.env.example
+secrets.*
+*.secret
+credentials*
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# ---- Logs / editor / OS ----
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
