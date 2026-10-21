@@ -1,51 +1,55 @@
-# client.py 
-import socket 
+# client.py (Bob)
+import socket
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import unpad, pad
+from utils import is_prime, is_primitive_root, generate_private_key, \
+    generate_public_key, compute_shared_secret, derive_aes_key
 
-# get local machine name 
+# get local machine name
 #host = socket.gethostname()
 host = '127.0.0.1'
 
 port = 9999
 
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+# Socket is named sock so it doesn't clash with the shared secret s
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
     # connection to hostname on the port.
-    s.connect((host, port))
+    sock.connect((host, port))
 
-    # Wait for the server's encrypted data first, so key.txt and ct.txt are written before we read them
-    tm = s.recv(1024)
-    print("CLIENT: Received ciphertext (%d bytes): %s" % (len(tm), tm.hex()))
+    # ------------------ DIFFIE-HELLMAN (BOB) ------------------
+    # Receive the public values p, g and Alice's A
+    p, g, A = map(int, sock.recv(1024).decode().split(","))
+    print(f"CLIENT: Received p={p}, g={g}, A={A}")
 
-    # -------------------- ENCRYPTION ---------------------------
-    # Key File Location
-    input_file1 = r"C:\Users\domin\OneDrive\Desktop\Cyber Security Reports\Client_Server_Lab\key.txt"
+    # Check p is prime and g is a primitive root
+    if not is_prime(p) or not is_primitive_root(g, p):
+        raise ValueError("Invalid DH parameters received from server")
 
-    # Read the data from the file
-    # Open The File
-    file_in = open(input_file1, 'rb')
-    # Read Key Bytes
-    key = file_in.read(16)
-    # Close File
-    file_in.close()
-    # DEBUG: Print the key in hex format <------- Don't leave in prod
-    print("CLIENT: KEY read from key.txt (hex):", key.hex())
-    # Input file for ciphertext message
-    input_file2 = r"C:\Users\domin\OneDrive\Desktop\Cyber Security Reports\Client_Server_Lab\ct.txt"
-    # Open the file to read bytes
-    file_in = open(input_file2, 'rb')
-    # Read the rest of the data
-    ciphered_message = file_in.read()
-    # Close File
-    file_in.close()
-    # DEBUG: Print the ciphertext in hex format matches message sent <------- Don't leave in prod
-    print("CLIENT: ct.txt matches received ciphertext:",  ciphered_message == tm)
-    # Setup cipher
+    # Bob chooses a secret integer b (never sent over the network)
+    b = generate_private_key(p)
+    # Bob computes his public value B = g^b mod p
+    B = generate_public_key(g, b, p)
+
+    # Step 4: Send B to Alice in the clear (public value)
+    sock.sendall(str(B).encode())
+    # DEBUG: Print the secret b <------- Don't leave in prod
+    print(f"CLIENT: b(secret)={b}, sent B={B}")
+
+    # Step 6: Bob computes the shared secret s = A^b mod p
+    shared = compute_shared_secret(A, b, p)
+    # Turn the shared secret into a 16-byte AES key (same as Alice's)
+    key = derive_aes_key(shared)
+    # DEBUG: Print the shared secret and key <------- Don't leave in prod
+    print(f"CLIENT: Shared secret s={shared}, AES key (hex)={key.hex()}")
+
+    # Setup cipher with the DH-derived key
     cipher = AES.new(key, AES.MODE_ECB)
 
 
     # ------------------ RECEIVE DATA ------------------
     # Receive encrypted data from the server and decrypt it.
+    tm = sock.recv(1024)
+    print("CLIENT: Received ciphertext (%d bytes): %s" % (len(tm), tm.hex()))
     decrypted = cipher.decrypt(tm)
     # DEBUG: Print the decrypted message with padding <------- Don't leave in prod
     print("CLIENT: Decrypted, still padded:", decrypted)
@@ -65,7 +69,4 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     print("CLIENT: Reply plaintext:", reply)
     # DEBUG: Print the encrypted message <------- Don't leave in prod
     print("CLIENT: Sending encrypted reply (%d bytes): %s" % (len(reply_ct), reply_ct.hex()))
-    s.sendall(reply_ct)
-
-
-s.close() 
+    sock.sendall(reply_ct)

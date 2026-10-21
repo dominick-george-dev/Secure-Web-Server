@@ -1,14 +1,24 @@
-# server.py 
-import socket 
+# server.py (Alice)
+import socket
 import time
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import unpad, pad
-from Cryptodome.Random import get_random_bytes
+from utils import is_prime, is_primitive_root, generate_private_key, \
+    generate_public_key, compute_shared_secret, derive_aes_key
 
-# get local machine name 
+# get local machine name
 host = '127.0.0.1'
 
 port = 9999
+
+# ------------------ PUBLIC DH PARAMETERS ------------------
+# Alice and Bob publicly agree on modulus p and base g
+P = 7919
+G = 7      # primitive root modulo 7919
+
+# Validate the parameters before using them
+assert is_prime(P), "p must be prime"
+assert is_primitive_root(G, P), "g must be a primitive root modulo p"
 
 # AF_INET = IPv4, SOCK_STREAM = TCP
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
@@ -26,51 +36,50 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         with conn: # closes conn automatically
             print(f"Got a connection from {addr}")
 
-            #------------------ ENCRYPTION ---------------------------
-             #ToDo: Make encryption to the existing server infrastructure. Use the AES-ECB mode to encrypt the message before sending it to the client. The key should be read from a file, and the message should be padded to match the block size of AES. After sending the encrypted message, wait for a response from the client, decrypt it, and print it to the console.
-            key_location = r"C:\Users\domin\OneDrive\Desktop\Cyber Security Reports\Client_Server_Lab\key.txt"
-            key = get_random_bytes(16)
+            # ------------------ DIFFIE-HELLMAN (ALICE) ------------------
+            # Step 2: Alice chooses a secret integer a (never sent over the network)
+            a = generate_private_key(P)
+            # Alice computes her public value A = g^a mod p
+            A = generate_public_key(G, a, P)
+            # DEBUG: Print the secret a <------- Don't leave in prod
+            print(f"SERVER: p={P}, g={G}, a(secret)={a}, A={A}")
 
+            # Step 4: Send p, g and A to Bob in the clear (all public values)
+            conn.sendall(f"{P},{G},{A}".encode())
+
+            # Receive Bob's public value B
+            B = int(conn.recv(1024).decode())
+            print(f"SERVER: Received B={B}")
+
+            # Step 5: Alice computes the shared secret s = B^a mod p
+            s = compute_shared_secret(B, a, P)
+            # Turn the shared secret into a 16-byte AES key
+            key = derive_aes_key(s)
+            # DEBUG: Print the shared secret and key <------- Don't leave in prod
+            print(f"SERVER: Shared secret s={s}, AES key (hex)={key.hex()}")
+
+
+            #------------------ ENCRYPTION ---------------------------
             # message variable
             message = time.ctime() + "\r\n"
-
-
-            file_out = open(key_location, "wb") # wb = write bytes
-            file_out.write(key)
-            file_out.close()
-            print("SERVER: Key written to key.text (hex):", key.hex())
 
             padded = pad(message.encode('ascii'), AES.block_size) # Pad the input data to match the block size of AES
             print("SERVER: Plaintext:", repr(message))
             print("SERVER: Padded (%d bytes, %d blocks): %s" % (len(padded), len(padded)//16, padded))
 
-            cipher = AES.new(key, AES.MODE_ECB) # Create a AES cipher object with the key using the mode ECB
-            ciphered_message = cipher.encrypt(pad(message.encode('ascii'), AES.block_size)) # Pad the input data and then encrypt
-            output_file = r"C:\Users\domin\OneDrive\Desktop\Cyber Security Reports\Client_Server_Lab\ct.txt" # Output file
-            file_out = open(output_file, "wb") # Open file to write bytes
-            file_out.write(ciphered_message) # Write the varying length cipher text to the file (this is the encrypted data)
-            file_out.close()
-            print("key (bytes):")
-            print(key)
-            key1 = int.from_bytes(key, "big") #converting key from bytes to int,
-            #If byteorder is "big", the most significant byte is at the beginning of the byte array.
-            #If byteorder is "little", the most significant byte is at the end of the byte array.
-            print("key (int):")
-            print(key1)
-            print("ciphertext (bytes):")
-            print(ciphered_message)
+            cipher = AES.new(key, AES.MODE_ECB) # Create a AES cipher object with the DH-derived key using the mode ECB
+            ciphered_message = cipher.encrypt(padded) # Encrypt the padded data
+
 
             #------------------ SEND DATA TO CLIENT ------------------
-            # ToDo: Send encrypted data to the client.
+            # Send encrypted data to the client.
             print("SERVER: Sending ciphertext (%d bytes): %s" % (len(ciphered_message), ciphered_message.hex()))
             conn.sendall(ciphered_message)
 
 
             #------------------ RECEIVE DATA FROM CLIENT ------------------
             # decrypt receieved client data
-
             data = conn.recv(1024)
-            #print(f"Received from client: {cipher.decrypt(data)}")
             print("SERVER: Received ciphertext (%d bytes): %s" % (len(data), data.hex()))
             decrypted = cipher.decrypt(data)
             print("SERVER: Decrypted, still padded:", decrypted)
